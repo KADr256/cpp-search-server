@@ -80,14 +80,14 @@ public:
             });
     }
 
-    template <typename Status>
-    vector<Document> FindTopDocuments(const string& raw_query, Status status) const {
+    template <typename Filter>
+    vector<Document> FindTopDocuments(const string& raw_query, Filter filter) const {
         const Query query = ParseQuery(raw_query);
-        auto matched_documents = FindAllDocuments(query, status);
-
+        auto matched_documents = FindAllDocuments(query, filter);
         sort(matched_documents.begin(), matched_documents.end(),
             [](const Document& lhs, const Document& rhs) {
-                if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
+                const double epsilon = 1e-6;
+                if (abs(lhs.relevance - rhs.relevance) < epsilon) {
                     return lhs.rating > rhs.rating;
                 }
                 else {
@@ -98,6 +98,10 @@ public:
             matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
         }
         return matched_documents;
+    }
+
+    vector<Document> FindTopDocuments(const string& raw_query, DocumentStatus document_status) const {
+        return FindTopDocuments(raw_query, [document_status](int document_id, DocumentStatus status, int rating) { return status == document_status; });
     }
 
     vector<Document> FindTopDocuments(const string& raw_query) const {
@@ -212,21 +216,17 @@ private:
         return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
     }
 
-    template <typename Status>
-    vector<Document> FindAllDocuments(const Query& query, Status status) const {
+    template <typename Filter>
+    vector<Document> FindAllDocuments(const Query& query, Filter filter) const {
         map<int, double> document_to_relevance;
         for (const string& word : query.plus_words) {
             if (word_to_document_freqs_.count(word) == 0) {
                 continue;
             }
             const double inverse_document_freq = ComputeWordInverseDocumentFreq(word);
-            for (const auto [document_id, term_freq] : word_to_document_freqs_.at(word)) {
-                if constexpr (is_same_v<Status, DocumentStatus>) {
-                    if (documents_.at(document_id).status == status) {
-                        document_to_relevance[document_id] += term_freq * inverse_document_freq;
-                    }
-                }
-                else if (status(document_id, documents_.at(document_id).status, documents_.at(document_id).rating)) {
+            for (const auto& [document_id, term_freq] : word_to_document_freqs_.at(word)) {
+                DocumentData data = documents_.at(document_id);
+                if (filter(document_id, data.status, data.rating)) {
                     document_to_relevance[document_id] += term_freq * inverse_document_freq;
                 }
             }
@@ -287,3 +287,4 @@ int main() {
 
     return 0;
 }
+
