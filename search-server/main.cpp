@@ -107,6 +107,9 @@ public:
         if (documents_.count(document_id) == 1) {
             throw invalid_argument("Идентификатор используется");
         }
+        if (TestSpecialCharacter(document)) {
+            throw invalid_argument("Спецсимвол"s);
+        }
         const vector<string> words = SplitIntoWordsNoStop(document);
         const double inv_word_count = 1.0 / words.size();
         for (const string& word : words) {
