@@ -11,6 +11,7 @@
 using namespace std;
 
 const int MAX_RESULT_DOCUMENT_COUNT = 5;
+const double RELEVANCE_ROUNDING = 1e-6;
 
 string ReadLine() {
     string s;
@@ -25,18 +26,10 @@ int ReadLineWithNumber() {
     return result;
 }
 
-void TestSpecialCharacter(const char c) {
-    if (c >= (char)0 && c <= (char)31) {
-        throw invalid_argument("Спецсимвол"s);
-    }
-    return;
-}
-
 vector<string> SplitIntoWords(const string& text) {
     vector<string> words;
     string word;
     for (const char c : text) {
-        TestSpecialCharacter(c);
         if (c == ' ') {
             if (!word.empty()) {
                 words.push_back(word);
@@ -73,9 +66,6 @@ set<string> MakeUniqueNonEmptyStrings(const StringContainer& strings) {
     set<string> non_empty_strings;
     for (const string& str : strings) {
         if (!str.empty()) {
-            for (const char& c : str) {
-                TestSpecialCharacter(c);
-            }
             non_empty_strings.insert(str);
         }
     }
@@ -98,6 +88,11 @@ public:
     template <typename StringContainer>
     explicit SearchServer(const StringContainer& stop_words)
         : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
+        for (string word : stop_words) {
+            if (TestSpecialCharacter(word)) {
+                throw invalid_argument("Спецсимвол"s);
+            }
+        }
     }
 
     explicit SearchServer(const string& stop_words_text)
@@ -124,11 +119,14 @@ public:
 
     template <typename DocumentPredicate>
     vector<Document> FindTopDocuments(const string& raw_query, DocumentPredicate document_predicate) const {
+        if (TestSpecialCharacter(raw_query)) {
+            throw invalid_argument("Спецсимвол"s);
+        }
         const Query query = ParseQuery(raw_query);
         auto matched_documents = FindAllDocuments(query, document_predicate);
 
         sort(matched_documents.begin(), matched_documents.end(), [](const Document& lhs, const Document& rhs) {
-            if (abs(lhs.relevance - rhs.relevance) < 1e-6) {
+            if (abs(lhs.relevance - rhs.relevance) < RELEVANCE_ROUNDING) {
                 return lhs.rating > rhs.rating;
             }
             else {
@@ -163,6 +161,9 @@ public:
     }
 
     tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query, int document_id) const {
+        if (TestSpecialCharacter(raw_query)) {
+            throw invalid_argument("Спецсимвол"s);
+        }
         const Query query = ParseQuery(raw_query);
         vector<string> matched_words;
         for (const string& word : query.plus_words) {
@@ -195,6 +196,15 @@ private:
     map<int, DocumentData> documents_;
     vector<int> document_ids_;
 
+    bool TestSpecialCharacter(const string& word) const {
+        for (const char& c : word) {
+            if (c >= (char)0 && c <= (char)31) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool IsStopWord(const string& word) const {
         return stop_words_.count(word) > 0;
     }
@@ -214,7 +224,7 @@ private:
             return 0;
         }
         int rating_sum = 0;
-        for (const int rating : ratings) {
+        for (const int rating : ratings) { 
             rating_sum += rating;
         }
         return rating_sum / static_cast<int>(ratings.size());
@@ -228,12 +238,15 @@ private:
 
     QueryWord ParseQueryWord(string text) const {
         bool is_minus = false;
-        // Word shouldn't be empty
+        // Word shouldn't be empty   
+        if (text.empty()) {
+            throw out_of_range("Пропажа(?) запроса");
+        }
         if (text[0] == '-') {
             if (text.size() == 1) {
                 throw invalid_argument("Ничего после -");
             }
-            else if (text[1] == '-') {
+            if (text[1] == '-') {
                 throw invalid_argument("Больше одного - подряд");
             }
             is_minus = true;
