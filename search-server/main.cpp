@@ -6,6 +6,8 @@
 
 #include <string>
 
+using namespace std;//Проверьте, что файл main.cpp в вашем репозитории содержит тот же код, который прошел тесты в уроке «Делим проект на файлы».
+
 int main() {
     SearchServer search_server((std::string)"and of");
     RequestQueue request_queue(search_server);
