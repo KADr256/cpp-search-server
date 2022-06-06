@@ -1,6 +1,7 @@
 #pragma once
 #include "document.h"
 #include "string_processing.h"
+#include "log_duration.h"
 
 #include <algorithm>
 #include <cmath>
@@ -36,9 +37,19 @@ public:
 
 	int GetDocumentCount() const;
 
-	int GetDocumentId(int index) const;
-
 	std::tuple<std::vector<std::string>, DocumentStatus> MatchDocument(const std::string& raw_query, int document_id) const;
+
+	auto begin() const {
+		return document_ids_.begin();
+	};
+
+	auto end() const {
+		return document_ids_.end();
+	};
+
+	const std::map<std::string, double>& GetWordFrequencies(int document_id) const;
+
+	void RemoveDocument(int document_id);
 
 private:
 	struct DocumentData {
@@ -47,8 +58,10 @@ private:
 	};
 	const std::set<std::string> stop_words_;
 	std::map<std::string, std::map<int, double>> word_to_document_freqs_;
+	std::map<int, std::map<std::string, double>> id_to_word_freqs_;
+	std::map<std::string, double> empty_string_double_map;
 	std::map<int, DocumentData> documents_;
-	std::vector<int> document_ids_;
+	std::set<int> document_ids_;
 
 	bool IsValidWord(const std::string& word) const;
 
@@ -92,6 +105,7 @@ SearchServer::SearchServer(const StringContainer& stop_words)
 
 template <typename DocumentPredicate>
 std::vector<Document> SearchServer::FindTopDocuments(const std::string& raw_query, DocumentPredicate document_predicate) const {
+	LOG_DURATION_STREAM((std::string)"FTD", std::cerr);
 	if (!IsValidWord(raw_query)) {
 		throw std::invalid_argument("Спецсимвол");
 	}

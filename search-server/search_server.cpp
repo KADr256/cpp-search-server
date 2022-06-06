@@ -22,9 +22,10 @@ void SearchServer::AddDocument(int document_id, const std::string& document, Doc
 	const double inv_word_count = 1.0 / words.size();
 	for (const std::string& word : words) {
 		word_to_document_freqs_[word][document_id] += inv_word_count;
+		id_to_word_freqs_[document_id][word] += inv_word_count;
 	}
 	documents_.emplace(document_id, DocumentData{ ComputeAverageRating(ratings), status });
-	document_ids_.push_back(document_id);
+	document_ids_.insert(document_id);
 	return;
 }
 
@@ -42,14 +43,8 @@ int SearchServer::GetDocumentCount() const {
 	return documents_.size();
 }
 
-int SearchServer::GetDocumentId(int index) const {
-	if (index < 0 || index >= GetDocumentCount()) {
-		throw std::out_of_range("Неверный индекс");
-	}
-	return document_ids_[index];
-}
-
 std::tuple<std::vector<std::string>, DocumentStatus> SearchServer::MatchDocument(const std::string& raw_query, int document_id) const {
+	LOG_DURATION_STREAM((std::string)"MD", std::cerr);
 	if (!IsValidWord(raw_query)) {
 		throw std::invalid_argument("Спецсимвол");
 	}
@@ -74,6 +69,26 @@ std::tuple<std::vector<std::string>, DocumentStatus> SearchServer::MatchDocument
 	}
 	return { matched_words, documents_.at(document_id).status };
 }
+
+const std::map<std::string, double>& SearchServer::GetWordFrequencies(int document_id) const {
+	if (id_to_word_freqs_.at(document_id).empty()) {
+		return empty_string_double_map;
+	}
+	return id_to_word_freqs_.at(document_id);
+}
+
+void SearchServer::RemoveDocument(int document_id) {
+	if (!document_ids_.count(document_id)) {
+		throw std::invalid_argument("Документа нет");
+	};
+	document_ids_.erase(document_id);
+	for (auto& data : id_to_word_freqs_[document_id]) {
+		word_to_document_freqs_[data.first].erase(document_id);
+	};
+	id_to_word_freqs_.erase(document_id);
+	documents_.erase(document_id);
+}
+
 
 bool SearchServer::IsValidWord(const std::string& word) const {
 	// A valid word must not contain special characters
