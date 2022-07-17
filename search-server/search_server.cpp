@@ -2,9 +2,7 @@
 
 #include <numeric>
 
-inline static constexpr int INVALID_DOCUMENT_ID = -1;
 const int QUERY_VECTOR_COUNT = 500;
-
 
 SearchServer::SearchServer(const std::string& stop_words_text)
 	: SearchServer(SplitIntoWords(stop_words_text))
@@ -60,7 +58,7 @@ std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDoc
 	if (document_ids_.count(document_id) == 0) {
 		throw std::out_of_range("Нет ID");
 	}
-	const Query query = ParseQuery(static_cast<std::string>(raw_query));
+	const Query query = ParseQuery(raw_query,true);
 	std::vector<std::string_view> matched_words;
 	for (std::string_view word : query.minus_words) {
 		if (id_to_word_freqs_.at(document_id).count(word) == 0) {
@@ -81,8 +79,36 @@ std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDoc
 	return { matched_words, documents_.at(document_id).status };
 }
 
+std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDocument(std::execution::sequenced_policy, std::string_view raw_query, int document_id) const {
+	return MatchDocument(raw_query, document_id);
+}
+
+std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDocument(std::execution::parallel_policy, std::string_view raw_query, int document_id) const {
+	//LOG_DURATION_STREAM((std::string)"MD", std::cerr);
+	//auto test = LogDuration("");
+	if (document_ids_.count(document_id) == 0) {
+		throw std::out_of_range("Нет ID");
+	}
+	const Query query = ParseQuery(std::execution::par, raw_query, true);
+	std::vector<std::string_view> matched_words;
+	if (!none_of(std::execution::par, query.minus_words.begin(), query.minus_words.end(), [&](auto& word) {
+		return id_to_word_freqs_.at(document_id).count(word);
+		})) {
+		return { matched_words, documents_.at(document_id).status };
+	};
+
+	matched_words.resize(query.plus_words.size());
+	auto del = std::copy_if(std::execution::par, query.plus_words.begin(), query.plus_words.end(), matched_words.begin(), [&](auto& word) {
+		return id_to_word_freqs_.at(document_id).count(word);
+		});
+	matched_words.erase(del, matched_words.end());
+
+	return { matched_words, documents_.at(document_id).status };
+}
+
 const std::map<std::string_view, double>& SearchServer::GetWordFrequencies(int document_id) const {
 	if (id_to_word_freqs_.at(document_id).empty()) {
+		static std::map<std::string_view, double> empty_string_double_map;
 		return empty_string_double_map;
 	}
 	return id_to_word_freqs_.at(document_id);
@@ -137,24 +163,11 @@ SearchServer::QueryWord SearchServer::ParseQueryWord(std::string_view text) cons
 	return { (std::string)text, is_minus, IsStopWord((std::string)text) };
 }
 
-SearchServer::Query SearchServer::ParseQuery(const std::string& text) const {
+SearchServer::Query SearchServer::ParseQuery(std::string_view text,bool unique=false) const {
 	Query query;
-	for (const std::string& word : SplitIntoWords(text)) {
-		const QueryWord query_word = ParseQueryWord(word);
-		if (!query_word.is_stop) {
-			if (query_word.is_minus) {
-				query.minus_words.insert(query_word.data);
-			}
-			else {
-				query.plus_words.insert(query_word.data);
-			}
-		}
+	if (!IsValidWord(text)) {
+		throw std::invalid_argument("Спецсимвол");
 	}
-	return query;
-}
-
-SearchServer::QueryVec SearchServer::ParseQueryVec(std::string_view text) const {
-	QueryVec query;
 	query.plus_words.reserve(QUERY_VECTOR_COUNT);
 	query.minus_words.reserve(QUERY_VECTOR_COUNT);
 	for (std::string_view word : SplitIntoWordsView(text)) {
@@ -168,16 +181,52 @@ SearchServer::QueryVec SearchServer::ParseQueryVec(std::string_view text) const 
 			}
 		}
 	}
-	auto future1 = std::async([&query]() {
-		std::sort(std::execution::par, query.plus_words.begin(), query.plus_words.end());
-		auto del = std::unique(std::execution::par, query.plus_words.begin(), query.plus_words.end());
+	if (unique) {
+		std::sort(std::execution::seq, query.plus_words.begin(), query.plus_words.end());
+		auto del = std::unique(std::execution::seq, query.plus_words.begin(), query.plus_words.end());
 		query.plus_words.erase(del, query.plus_words.end());
-		});
-	std::sort(std::execution::par, query.minus_words.begin(), query.minus_words.end());
-	auto del = std::unique(std::execution::par, query.minus_words.begin(), query.minus_words.end());
-	query.minus_words.erase(del, query.minus_words.end());
-	future1.wait();
-	future1.get();
+
+		std::sort(std::execution::seq, query.minus_words.begin(), query.minus_words.end());
+		del = std::unique(std::execution::seq, query.minus_words.begin(), query.minus_words.end());
+		query.minus_words.erase(del, query.minus_words.end());
+	}
+	return query;
+}
+
+SearchServer::Query SearchServer::ParseQuery(std::execution::sequenced_policy,std::string_view text,bool unique = false) const {
+	return ParseQuery(text,unique);
+}
+
+SearchServer::Query SearchServer::ParseQuery(std::execution::parallel_policy,std::string_view text,bool unique = false) const {
+	Query query;
+	if (!IsValidWord(std::execution::par,text)) {
+		throw std::invalid_argument("Спецсимвол");
+	}
+	query.plus_words.reserve(QUERY_VECTOR_COUNT);
+	query.minus_words.reserve(QUERY_VECTOR_COUNT);
+	for (std::string_view word : SplitIntoWordsView(text)) {
+		const QueryWord query_word = ParseQueryWord(word);
+		if (!query_word.is_stop) {
+			if (query_word.is_minus) {
+				query.minus_words.push_back(query_word.data);
+			}
+			else {
+				query.plus_words.push_back(query_word.data);
+			}
+		}
+	}
+	if (unique) {
+		auto future1 = std::async([&query]() {
+			std::sort(std::execution::par, query.plus_words.begin(), query.plus_words.end());
+			auto del = std::unique(std::execution::par, query.plus_words.begin(), query.plus_words.end());
+			query.plus_words.erase(del, query.plus_words.end());
+			});
+		std::sort(std::execution::par, query.minus_words.begin(), query.minus_words.end());
+		auto del = std::unique(std::execution::par, query.minus_words.begin(), query.minus_words.end());
+		query.minus_words.erase(del, query.minus_words.end());
+		future1.wait();
+		future1.get();
+	}
 	return query;
 }
 
