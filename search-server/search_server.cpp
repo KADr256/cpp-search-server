@@ -146,7 +146,6 @@ int SearchServer::ComputeAverageRating(const std::vector<int>& ratings) const {
 
 SearchServer::QueryWord SearchServer::ParseQueryWord(std::string_view text) const {
 	bool is_minus = false;
-	// Word shouldn't be empty   
 	if (text.empty()) {
 		throw std::out_of_range("Пропажа(?) запроса");
 	}

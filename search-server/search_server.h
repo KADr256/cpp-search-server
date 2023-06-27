@@ -157,11 +157,6 @@ std::vector<Document> SearchServer::FindTopDocuments(std::string_view raw_query,
 template <typename DocumentPredicate, class ExecutionPolicy>
 std::vector<Document> SearchServer::FindTopDocuments(ExecutionPolicy&& policy, std::string_view raw_query, DocumentPredicate document_predicate) const {
 	//LOG_DURATION_STREAM((std::string)"FTD", std::cerr);
-/*
-Без шаблона политики, некоторые FTD начинают принимать DocumentStatus как DocumentPredicate,а с шаблоном нужно проверять
-std::vector<Document> SearchServer::FindTopDocuments(std::execution::sequenced_policy, std::string_view raw_query, DocumentPredicate document_predicate) const;
-std::vector<Document> SearchServer::FindTopDocuments(std::execution::parallel_policy, std::string_view raw_query, DocumentPredicate document_predicate) const;
-*/
 	if constexpr (std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::sequenced_policy>) {
 		return FindTopDocuments(raw_query, document_predicate);
 
@@ -281,7 +276,6 @@ void SearchServer::RemoveDocument(ExecutionPolicy&& policy, int document_id) {
 
 template<class ExecutionPolicy>
 inline bool SearchServer::IsValidWord(ExecutionPolicy&& policy, std::string_view word) const {
-	// A valid word must not contain special characters
 	return std::none_of(policy, word.begin(), word.end(), [](char c) {
 		return c >= '\0' && c < ' ';
 		});
